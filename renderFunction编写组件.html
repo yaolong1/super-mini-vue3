@@ -1,0 +1,62 @@
+<script src="https://unpkg.com/vue@next"></script>
+
+<div id="app"></div>
+
+
+<style>
+  .mt-4 {
+    margin: 14px
+  }
+</style>
+
+<script>
+
+  const { h, createApp,watchEffect,reactive } = Vue;
+
+  const Stack = {
+    render() {
+      const slot = this.$slots.default
+        ? this.$slots.default()
+        : []
+
+      console.log('props', this)
+      return h('div', { class: "stack" }, slot.map(child => {
+        return h('div', { class: `mt-${this.$attrs.size}` }, [child])
+      }))
+    }
+  }
+
+
+
+  const App = {
+    components: {
+      Stack
+    },
+    template:
+      `
+    <Stack size="4">
+      <div>hello</div>
+      <Stack size="4">
+        <div>hello</div>
+        <div>hello</div>
+        <div>hello</div>
+      </Stack>
+    </Stack>
+    `
+  }
+
+  const flg = reactive({value:true})
+  const test = reactive({value: '我被收集了正在执行'})
+
+ watchEffect(()=>{
+   if(flg.value){
+    console.log(test.value)
+   }else{
+     console.log('false branch')
+   }
+ })
+  
+  createApp(App).mount('#app')
+
+
+</script>

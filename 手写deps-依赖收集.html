@@ -1,0 +1,66 @@
+<script>
+  //当前激活的副作用函数
+  let activeWatchEffect
+
+  //依赖类主要功能是为了收集依赖和执行依赖
+  class Dep {
+
+    constructor(value) {
+      this._value = value
+      this.subscribes = new Set() //去除重复的依赖
+    }
+
+    set value(newValue) {
+      this._value = newValue
+      this.notify()
+    }
+
+    get value() {
+      this.depend()
+      return this._value
+    }
+
+    //收集依赖
+    depend() {
+      console.log(activeWatchEffect)
+      activeWatchEffect && this.subscribes.add(activeWatchEffect)
+    }
+
+    //执行依赖
+    notify() {
+      this.subscribes.forEach(effect => {
+        effect()
+      });
+    }
+  }
+
+
+  //副作用函数（数据变更时执行）
+  function watchEffect(effect) {
+    //保存到全局变量方便收集依赖
+    activeWatchEffect = effect
+
+    //在执行副作用函数之前还要清理不用的依赖
+
+    //执行具体的副作用函数
+    effect()
+
+    // 置空
+    activeWatchEffect = null
+  }
+
+
+
+  const msg = new Dep('hello')
+  const ok = new Dep(true)
+
+  watchEffect(() => {
+    if (ok.value) {
+      console.log(msg.value) //当条件（ok.value）为false时msg.value依赖项是要删除的，如果不删除该依赖项，下次如果改变了msg.value也会执行该副作用函数，具体删除依赖的逻辑看源码
+    } else {
+      console.log('false branch')
+    }
+  })
+
+
+</script>

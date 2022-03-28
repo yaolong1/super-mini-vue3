@@ -1,0 +1,312 @@
+<div id="app"></div>
+
+<script>
+
+  //当前激活的副作用函数
+  let activeWatchEffect
+
+  //依赖类主要功能是为了收集依赖和执行依赖
+  class Dep {
+
+    subscribes = new Set() //去除重复的依赖
+
+    //收集依赖
+    depend() {
+      activeWatchEffect && this.subscribes.add(activeWatchEffect)
+    }
+
+    //执行依赖
+    notify() {
+      this.subscribes.forEach(effect => {
+        effect()
+      });
+    }
+  }
+
+
+  //副作用函数（数据变更时执行）
+  function watchEffect(effect) {
+    //保存到全局变量方便收集依赖
+    activeWatchEffect = effect
+
+    //执行具体的副作用函数
+    effect()
+
+    // 置空
+    activeWatchEffect = null
+  }
+
+
+  function reactive(raw) {
+    //==========vue2中的响应式实现方式============
+    // Object.keys(raw).forEach(key => {
+    //   let value = raw[key]
+    //   const dep = new Dep()
+    //   Object.defineProperty(raw, key, {
+    //     get() {
+    //       dep.depend()
+    //       return value
+    //     },
+    //     set(newValue) {
+    //       value = newValue
+    //       dep.notify()
+    //     }
+    //   })
+    // })
+    //return raw
+
+
+    //================vue3中的响应式实现方式================
+    return new Proxy(raw, reactiveHandler)
+
+  }
+
+
+  //target总是一个对象，WeakMap支持对象作为键
+  //好处：由于target本身不再可以从任何代码访问，也就是说这个目标可以被垃圾回收，那么它在WeakMap中所对应的值也会被垃圾回收（弱引用）
+  // WeakMap是弱引用对象，弱引用的对象不可遍历！
+  const targetsMap = new WeakMap()
+
+
+  //获取当前目标对象中的依赖
+  function getDep(target, key) {
+
+    //通过目标对象获取该对象下的所有依赖，
+    //如果有对象就继续执行
+    //如果没有就创建一个map来存储该对象（target）的依赖集，然后存放到总的targetsMap中 
+    //这样就完全区分了多个目标对象（target）的多个依赖集的问题
+    let depsMap = targetsMap.get(target)
+    if (!depsMap) {
+      depsMap = new Map()
+      targetsMap.set(target, depsMap)
+    }
+
+    //由于一个目标对象(target)中有许多的属性，对于当前的属性key，我们需要通过key在target对象中的依赖集（depsMap）获取它的依赖（dep）
+    //如果没有获取到说明是第一次收集，重新创建一个Dep保存到当前对象的依赖集中（depsMap）
+    let dep = depsMap.get(key)
+    if (!dep) {
+      dep = new Dep()
+      depsMap.set(key, dep)
+    }
+    return dep
+  }
+
+  //响应式处理
+  const reactiveHandler = {
+    set(target, key, value, receiver) {
+      const dep = getDep(target, key)
+      const result = Reflect.set(target, key, value, receiver)
+      dep.notify()
+      console.log('执行依赖', target, key)
+      return result;
+    },
+    get(target, key, receiver) {
+      const dep = getDep(target, key)
+      dep.depend()
+      console.log('收集依赖', key, target, key)
+      //此处使用Reflect.get() 而不直接使用target[key]的原因是为了proxy中的this和对象的this保持一致
+      return Reflect.get(target, key, receiver)
+    }
+  }
+
+
+
+  //返回一个虚拟dom
+  function h(tag, props, children) {
+    return {
+      tag,
+      props,
+      children
+    }
+  }
+
+
+  /*
+  首次挂载视图渲染
+  */
+  function mount(vnode, container) {
+    //这里也将真实dom存到vnode.el中了，主要是应用于更新（patch）的时候
+    let el = vnode.el = document.createElement(vnode.tag);
+    //props
+    if (vnode.props) {
+      for (let key in vnode.props) {
+        const value = vnode.props[key]
+        //事件相关
+        if (key.startsWith('on')) {
+          console.log('props', value)
+          el.addEventListener(key.slice(2).toLowerCase(), value)
+        } else {
+          //非事件相关
+          el.setAttribute(key, value)
+        }
+      }
+    }
+
+
+    //children
+    if (vnode.children) {
+      //当h函数式h('div',null,'文本') children = text
+      if (typeof vnode.children === 'string') {
+        el.textContent = vnode.children
+
+        //h函数 h('div',null,[h(xx,xx,xx)]) children == 数组
+      } else {
+        vnode.children.forEach(child => {
+          if (typeof child === 'string') { //TODO 数组中存在多个text
+            el.appendChild(document.createTextNode(child))
+          } else {
+            mount(child, el)
+          }
+        });
+      }
+
+    }
+
+    //添加到el元素children
+    container.appendChild(el)
+  }
+
+
+
+  /**
+   * h1:旧的虚拟dom
+   * h2:新的虚拟dom
+   * 
+   * des:此函数是用来更新视图的
+   */
+  function patch(n1, n2) {
+    const el = n2.el = n1.el
+
+    if (n1.tag === n2.tag) {
+      //props相关变化的处理
+      const oldProps = n1.props || {}
+      const newProps = n2.props || {}
+
+      //如果当前的node节点的attribute新增了，基于新增的props循环对比老的props。设置新增的props
+      for (const key in newProps) {
+        const newValue = newProps[key]
+        const oldValue = oldProps[key]
+        if (newValue !== oldValue) {
+          el.setAttribute(key, newProps[key])
+        }
+      }
+      //如果当前的node节点的attribute减少了就不用对比直接删除老的props中，不在新props中的prop
+      for (const key in oldProps) {
+        if (!(key in newProps)) {
+          el.removeAttribute(key)
+        }
+      }
+
+
+
+      //children 相关的更新处理
+      const newChildren = n2.children
+      const oldChildren = n1.children
+
+      //如果新children是一个文本不是数组-------更新的情况
+      if (typeof newChildren === 'string') {
+        //新children和老children相等(都是文本)
+        if (typeof oldChildren === 'string') {
+
+          //内容不同则更新为新children的text
+          if (newChildren !== oldChildren) {
+            el.textContent = newChildren
+          }
+          //说明老children是一个数组
+        } else if (typeof oldChildren === 'object') {
+          el.textContent = newChildren
+        }
+
+        //如果新children是数组-------更新的情况
+      } else {
+
+        //如果老children是一个文本
+        if (typeof oldChildren === 'string') {
+          //清空
+          el.textContent = ''
+          //将新的children挂载到el上
+          newChildren.forEach(child => mount(child, el))
+
+          //newChildren 和 oldChildren都是数组
+          //思路： 如果新老children都是数组，
+          //第一步 更新公共部分的child
+          //第二步 判断是新的children长还是老的children长，
+          //              如果是新的children长就截取公共部分外的挂载到当前的el上，
+          //              如果老children长就删除除公共部分外多余的老children
+        } else {
+          //公共部分的长度
+          const commonLength = Math.min(newChildren.length, oldChildren.length)
+
+          for (let i = 0; i < commonLength; i++) {
+            patch(oldChildren[i], newChildren[i])
+          }
+
+          //新children比老children长
+          if (newChildren.length > oldChildren.length) {
+            //截取公共部分外的挂载到当前的el上
+            newChildren.slice(commonLength).forEach(child => mount(child, el))
+          }
+
+          //老children比新children长
+          if (oldChildren.length > newChildren.length) {
+            //截取公共部分外的挂载到当前的el上
+            oldChildren.slice(commonLength).forEach(child => el.removeChild(child.el))
+          }
+
+        }
+      }
+    } else {
+      //替换新的
+      if (typeof n2 === 'string') {
+        console.log('纯文本', n2)
+      }
+    }
+
+  }
+
+  const data = reactive({ count: 1 })
+  const name = reactive({ value: '小明' })
+  const App = {
+    render() {
+
+      return h('div', {
+        onClick: () => {
+          data.count++
+          console.log(data.count)
+        }
+      }, String(data.count))
+    },
+  }
+
+  function createApp(app) {
+    return {
+      mount(el) {
+        const element = document.getElementById(el)
+        let isMounted = false
+        let preVDom
+        watchEffect(() => {
+          if (!isMounted) {
+            preVDom = app.render()
+            mount(preVDom, element)
+            isMounted = true
+          } else {
+            const newVDom = app.render()
+            patch(preVDom, newVDom)
+            preVDom = newVDom
+          }
+        })
+      }
+    }
+  }
+
+  createApp(App).mount('app')
+
+
+  // watchEffect(() => {
+  //   if (data.count == 1) {
+  //     console.log('我发生改变', name.value)
+  //   } else {
+  //     console.log('false branch')
+  //   }
+  // })
+</script>

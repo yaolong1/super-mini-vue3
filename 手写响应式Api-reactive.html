@@ -1,0 +1,114 @@
+<script>
+  //当前激活的副作用函数
+  let activeWatchEffect
+
+  //依赖类主要功能是为了收集依赖和执行依赖
+  class Dep {
+
+    subscribes = new Set() //去除重复的依赖
+
+    //收集依赖
+    depend() {
+      activeWatchEffect && this.subscribes.add(activeWatchEffect)
+    }
+
+    //执行依赖
+    notify() {
+      this.subscribes.forEach(effect => {
+        effect()
+      });
+    }
+  }
+
+
+  //副作用函数（数据变更时执行）
+  function watchEffect(effect) {
+    //保存到全局变量方便收集依赖
+    activeWatchEffect = effect
+
+    //执行具体的副作用函数
+    effect()
+
+    // 置空
+    activeWatchEffect = null
+  }
+
+
+  function reactive(raw) {
+    //==========vue2中的响应式实现方式============
+    // Object.keys(raw).forEach(key => {
+    //   let value = raw[key]
+    //   const dep = new Dep()
+    //   Object.defineProperty(raw, key, {
+    //     get() {
+    //       dep.depend()
+    //       return value
+    //     },
+    //     set(newValue) {
+    //       value = newValue
+    //       dep.notify()
+    //     }
+    //   })
+    // })
+    //return raw
+
+
+    //================vue3中的响应式实现方式================
+    return new Proxy(raw, reactiveHandler)
+
+  }
+
+
+  //target总是一个对象，WeakMap支持对象作为键
+  //好处：由于target本身不再可以从任何代码访问，也就是说这个目标可以被垃圾回收，那么它在WeakMap中所对应的值也会被垃圾回收（弱引用）
+  // WeakMap是弱引用对象，弱引用的对象不可遍历！
+  const targetsMap = new WeakMap()
+
+
+  //获取当前目标对象中的依赖
+  function getDep(target, key) {
+
+    //通过目标对象获取该对象下的所有依赖，
+    //如果有对象就继续执行
+    //如果没有就创建一个map来存储该对象（target）的依赖集，然后存放到总的targetsMap中 
+    //这样就完全区分了多个目标对象（target）的多个依赖集的问题
+    let depsMap = targetsMap.get(target)
+    if (!depsMap) {
+      depsMap = new Map()
+      targetsMap.set(target, depsMap)
+    }
+
+    //由于一个目标对象(target)中有许多的属性，对于当前的属性key，我们需要通过key在target对象中的依赖集（depsMap）获取它的依赖（dep）
+    //如果没有获取到说明是第一次收集，重新创建一个Dep保存到当前对象的依赖集中（depsMap）
+    let dep = depsMap.get(key)
+    if (!dep) {
+      dep = new Dep()
+      depsMap.set(key, dep)
+    }
+    return dep
+  }
+
+  //响应式处理
+  const reactiveHandler = {
+    set(target, key, value, receiver) {
+      const dep = getDep(target, key)
+      const result = Reflect.set(target, key, value, receiver)
+      dep.notify()
+      return result;
+    },
+    get(target, key, receiver) {
+      const dep = getDep(target, key)
+      dep.depend()
+
+      //此处使用Reflect.get() 而不直接使用target[key]的原因是为了proxy中的this和对象的this保持一致
+      return Reflect.get(target, key, receiver)
+    }
+  }
+  const count = reactive({ state: 1 })
+
+  watchEffect(() => {
+    console.log(count.state)
+  })
+
+  count.state += 1
+</script>
